@@ -4,7 +4,7 @@ from pathlib import Path
 # CONFIG
 # ----------------------------
 
-TARGET_TEXT = "xbxbxbx"
+TARGET_TEXT = "xxx"
 
 MOVE_DURATION = 1.0
 CLICK_PAUSE = 0.4

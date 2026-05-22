@@ -1,113 +1,44 @@
-from config import (
-    ICON_CROP_DIR,
-    GRID_ROWS,
-    GRID_COLS,
-    MIN_ICON_CROP_WIDTH,
-    MIN_ICON_CROP_HEIGHT,
-)
+from PIL import ImageDraw
+
+from config import SCREENSHOT_DIR
 from utils import parse_relative_xy
 
 
-def rects_intersect(a, b):
-    ax1, ay1, ax2, ay2 = a
-    bx1, by1, bx2, by2 = b
-    return not (ax2 <= bx1 or ax1 >= bx2 or ay2 <= by1 or ay1 >= by2)
-
-
-def save_no_text_grid_candidates(img, monitor_index, ocr_items):
+def save_icons_only_image(img, monitor_index, ocr_items):
     """
-    Split the screen into a grid and save regions that do not overlap
-    any OCR text as potential icon/visual-choice candidates.
+    Produces a copy of the screenshot with every OCR text bounding box
+    painted over in solid gray, leaving only non-text content (icons,
+    images, UI elements) visible.
     """
-    img_width, img_height = img.size
+    masked = img.copy()
+    draw = ImageDraw.Draw(masked)
 
-    text_rects = [
-        (item["x"], item["y"], item["x"] + item["w"], item["y"] + item["h"])
-        for item in ocr_items
-    ]
+    for item in ocr_items:
+        x, y, w, h = item["x"], item["y"], item["w"], item["h"]
+        draw.rectangle([x, y, x + w, y + h], fill=(180, 180, 180))
 
-    cell_w = img_width / GRID_COLS
-    cell_h = img_height / GRID_ROWS
-
-    saved = []
-    candidate_index = 1
-
-    for row in range(GRID_ROWS):
-        for col in range(GRID_COLS):
-            left = int(col * cell_w)
-            top = int(row * cell_h)
-            right = int((col + 1) * cell_w)
-            bottom = int((row + 1) * cell_h)
-
-            w = right - left
-            h = bottom - top
-
-            if w < MIN_ICON_CROP_WIDTH or h < MIN_ICON_CROP_HEIGHT:
-                continue
-
-            cell_rect = (left, top, right, bottom)
-
-            if any(rects_intersect(cell_rect, tr) for tr in text_rects):
-                continue
-
-            crop = img.crop((left, top, right, bottom))
-            crop_path = ICON_CROP_DIR / f"monitor_{monitor_index}_candidate_{candidate_index}.png"
-            crop.save(crop_path)
-
-            saved.append({
-                "path": crop_path,
-                "monitor_index": monitor_index,
-                "crop_left": left,
-                "crop_top": top,
-                "crop_right": right,
-                "crop_bottom": bottom,
-                "crop_width": w,
-                "crop_height": h,
-            })
-
-            candidate_index += 1
-
-    return saved
+    out_path = SCREENSHOT_DIR / f"icons_only_monitor_{monitor_index}.png"
+    masked.save(out_path)
+    print(f"Saved icons-only image: {out_path}")
+    return out_path
 
 
-def ask_user_to_choose_icon_candidate(saved_candidates):
-    print("\nNo matching text found.")
-    print("Saved non-text candidate regions.")
-    print("Open these images and choose the most relevant one:\n")
-
-    for i, item in enumerate(saved_candidates, start=1):
-        print(
-            f"{i}. {item['path']} "
-            f"| size={item['crop_width']}x{item['crop_height']}"
-        )
+def ask_user_for_pixel_click(icon_image_path, img_width, img_height):
+    """
+    Shows the path to the icons-only image and prompts the user to enter
+    the pixel coordinate of the icon they want to click.
+    """
+    print(f"\nOpen this image and find the icon you want to click:")
+    print(f"  {icon_image_path}")
+    print(f"Image size: {img_width} x {img_height} px")
+    print("Enter the pixel x,y coordinate of the icon.")
 
     while True:
-        choice = input("\nEnter candidate number: ").strip()
-
-        if choice.isdigit():
-            index = int(choice)
-            if 1 <= index <= len(saved_candidates):
-                return saved_candidates[index - 1]
-
-        print("Invalid choice. Try again.")
-
-
-def ask_user_for_relative_click(candidate):
-    print("\nNow enter the click coordinate inside the chosen crop.")
-    print("Use relative crop coordinates.")
-    print("Example: 120, 45 means x=120 px from left, y=45 px from top.")
-    print(f"Crop size: {candidate['crop_width']} x {candidate['crop_height']}")
-
-    while True:
-        value = input("\nEnter relative x,y: ").strip()
-
+        value = input("\nEnter x,y (pixels): ").strip()
         try:
-            rel_x, rel_y = parse_relative_xy(value)
-
-            if 0 <= rel_x <= candidate["crop_width"] and 0 <= rel_y <= candidate["crop_height"]:
-                return rel_x, rel_y
-
-            print("Coordinates are outside the crop. Try again.")
-
+            px, py = parse_relative_xy(value)
+            if 0 <= px <= img_width and 0 <= py <= img_height:
+                return px, py
+            print(f"Coordinates must be within 0-{img_width}, 0-{img_height}. Try again.")
         except ValueError as e:
             print(e)
